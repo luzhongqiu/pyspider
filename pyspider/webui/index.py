@@ -94,6 +94,7 @@ def project_update():
 def counter():
     rpc = app.config['scheduler_rpc']
     if rpc is None:
+        print(11111111111111111)
         return json.dumps({})
 
     result = {}
@@ -156,3 +157,31 @@ Allow: /$
 Allow: /debug
 Disallow: /debug/*?taskid=*
 """, 200, {'Content-Type': 'text/plain'}
+
+
+@app.route('/health')
+def health():
+    # check queue
+    result = get_queues()
+    queue_info = dict(json.loads(result[0]))
+    try:
+        alert_info = {k: v for k, v in queue_info.items() if int(v) > 100}
+        if alert_info:
+            # some component down or need to add component
+            return {}
+    except Exception as e:
+        # queue down
+        return {}
+
+    print(alert_info)
+    # check error table
+    resultdb = app.config['resultdb']
+    project = 'error'
+    offset = int(request.args.get('offset', 0))
+    limit = int(request.args.get('limit', 20))
+    try:
+        results = list(resultdb.select(project, offset=offset, limit=limit))
+    except:
+        # db down
+        return {}
+    return json.dumps(results)

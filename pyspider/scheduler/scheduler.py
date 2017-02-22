@@ -771,6 +771,10 @@ class Scheduler(object):
             }
         application.register_function(webui_update, 'webui_update')
 
+        def ping():
+            return 'pong'
+        application.register_function(ping, 'ping')
+
         import tornado.wsgi
         import tornado.ioloop
         import tornado.httpserver

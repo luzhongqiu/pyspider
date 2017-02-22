@@ -706,6 +706,10 @@ class Fetcher(object):
             return self._cnt[_time].to_dict(_type)
         application.register_function(dump_counter, 'counter')
 
+        def ping():
+            return 'pong'
+        application.register_function(ping, 'ping')
+
         import tornado.wsgi
         import tornado.ioloop
         import tornado.httpserver

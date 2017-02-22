@@ -6,7 +6,8 @@
 # Created on 2014-02-22 23:20:39
 
 import socket
-
+import time
+import datetime
 from six import iteritems, itervalues
 from flask import render_template, request, json
 
@@ -161,19 +162,67 @@ Disallow: /debug/*?taskid=*
 
 @app.route('/health')
 def health():
-    # check queue
+    """
+    health check, service:
+    webui
+    scheduler
+    fetcher
+    processor
+    result_worker
+    :return:
+    """
+    # all service return dict
+    good = {
+        "status": "OK",
+        "type": "HARD",
+        "checked_at": gettime(),
+        "spent_time": "1ms",
+        "info": "ok"
+    }
+    bad = {
+        "status": "ERROR",
+        "type": "HARD",
+        "checked_at": gettime(),
+        "spent_time": "1ms",
+        "info": "ERROR"
+    }
+
+    _health = {
+        "status": "OK",
+        "dependencies": {
+            "webui": good.copy()
+        }
+    }
+
+    # scheduler fetcher procsssor result
+    mapping = {
+        'fetcher2processor': 'processor',
+        'newtask_queue': 'scheduler',
+        'processor2result': 'result_worker',
+        'scheduler2fetcher': 'fetcher'
+    }
+
     result = get_queues()
     queue_info = dict(json.loads(result[0]))
+    # redis down
     try:
-        alert_info = {k: v for k, v in queue_info.items() if int(v) > 100}
-        if alert_info:
-            # some component down or need to add component
-            return {}
-    except Exception as e:
-        # queue down
-        return {}
+        alert_info = {k: int(v) for k, v in queue_info.items()}
+        _health['dependencies']['redis'] = good.copy()
+    except:
+        _health['dependencies']['redis'] = bad.copy()
+        _health['dependencies']['redis']['info'] = 'redis down'
+        return json.dumps(_health)
 
-    print(alert_info)
+    # check num
+    for k, v in alert_info.items():
+        service = mapping.get(k)
+        if service:
+            if v >= 100:
+                _health['dependencies'][service] = bad.copy()
+                _health['dependencies'][service]['info'] = '{} down'.format(service)
+            else:
+                _health['dependencies'][service] = good.copy()
+
     # check error table
     resultdb = app.config['resultdb']
     project = 'error'
@@ -181,7 +230,32 @@ def health():
     limit = int(request.args.get('limit', 20))
     try:
         results = list(resultdb.select(project, offset=offset, limit=limit))
+        _health['dependencies']['db'] = good.copy()
     except:
         # db down
-        return {}
-    return json.dumps(results)
+        _health['dependencies']['db'] = bad.copy()
+        _health['dependencies']['db']['info'] = 'db down'
+
+    # scheduler xmlrpc detect
+    try:
+        app.config['scheduler_rpc_client'].ping()
+    except:
+        _health['dependencies']['scheduler']['status'] = 'ERROR'
+        _health['dependencies']['scheduler']['info'] = 'scheduler server down'
+
+    try:
+        app.config['fetcher_rpc_client'].ping()
+    except:
+        _health['dependencies']['fetcher']['status'] = 'ERROR'
+        _health['dependencies']['fetcher']['info'] = 'fetcher server down'
+
+    return json.dumps(_health)
+
+
+@app.route('/ping')
+def ping():
+    return 'pong'
+
+
+def gettime():
+    return datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S') + str(time.time() % 1)[1:5] + 'Z'

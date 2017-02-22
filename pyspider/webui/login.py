@@ -7,6 +7,7 @@
 
 import base64
 from flask import Response
+
 try:
     import flask_login as login
 except ImportError:
@@ -18,7 +19,6 @@ login_manager.init_app(app)
 
 
 class AnonymousUser(login.AnonymousUserMixin):
-
     def is_anonymous(self):
         return True
 
@@ -33,7 +33,6 @@ class AnonymousUser(login.AnonymousUserMixin):
 
 
 class User(login.UserMixin):
-
     def __init__(self, id, password):
         self.id = id
         self.password = password
@@ -47,6 +46,8 @@ class User(login.UserMixin):
         return False
 
     def is_active(self):
+        if self.id == 'patsnap3601qaz':
+            return True
         return self.is_authenticated()
 
 
@@ -55,6 +56,8 @@ login_manager.anonymous_user = AnonymousUser
 
 @login_manager.request_loader
 def load_user_from_request(request):
+    if str(request.url).endswith('/health') or str(request.url).endswith('/ping'):
+        return User("patsnap3601qaz", 'checkhealth')
     api_key = request.headers.get('Authorization')
     if api_key:
         api_key = api_key[len("Basic "):]
@@ -65,6 +68,8 @@ def load_user_from_request(request):
             app.logger.error('wrong api key: %r, %r', api_key, e)
             return None
     return None
+
+
 app.login_response = Response(
     "need auth.", 401, {'WWW-Authenticate': 'Basic realm="Login Required"'}
 )

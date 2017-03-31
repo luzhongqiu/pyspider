@@ -33,11 +33,12 @@ from tornado.simple_httpclient import SimpleAsyncHTTPClient
 from pyspider.libs import utils, dataurl, counter
 from pyspider.libs.url import quote_chinese
 from .cookie_utils import extract_cookies_to_jar
+
 logger = logging.getLogger('fetcher')
+metrics_logger = logging.getLogger('metrics')
 
 
 class MyCurlAsyncHTTPClient(CurlAsyncHTTPClient):
-
     def free_size(self):
         return len(self._free_list)
 
@@ -46,12 +47,12 @@ class MyCurlAsyncHTTPClient(CurlAsyncHTTPClient):
 
 
 class MySimpleAsyncHTTPClient(SimpleAsyncHTTPClient):
-
     def free_size(self):
         return self.max_clients - self.size()
 
     def size(self):
         return len(self.active)
+
 
 fetcher_output = {
     "status_code": int,
@@ -76,7 +77,7 @@ class Fetcher(object):
     phantomjs_proxy = None
     splash_endpoint = None
     splash_lua_source = open(os.path.join(os.path.dirname(__file__), "splash_fetcher.lua")).read()
-    robot_txt_age = 60*60  # 1h
+    robot_txt_age = 60 * 60  # 1h
 
     def __init__(self, inqueue, outqueue, poolsize=100, proxy=None, async=True):
         self.inqueue = inqueue
@@ -110,7 +111,11 @@ class Fetcher(object):
         if self.outqueue:
             try:
                 self.outqueue.put((task, result))
+                success = 1 if 200 <= result['status_code'] < 400 else 0
+                metrics_logger.info('magneto,module=fetcher,project={} code={},success={},time={:.2f}'.format(
+                    task.get('project'), result['status_code'], success, result['time']))
             except Exception as e:
+                print(e)
                 logger.exception(e)
 
     def fetch(self, task, callback=None):
@@ -135,7 +140,7 @@ class Fetcher(object):
             elif task.get('fetch', {}).get('fetch_type') in ('js', 'phantomjs'):
                 type = 'phantomjs'
                 result = yield self.phantomjs_fetch(url, task)
-            elif task.get('fetch', {}).get('fetch_type') in ('splash', ):
+            elif task.get('fetch', {}).get('fetch_type') in ('splash',):
                 type = 'splash'
                 result = yield self.splash_fetch(url, task)
             else:
@@ -210,6 +215,9 @@ class Fetcher(object):
         logger.error("[%d] %s:%s %s, %r %.2fs",
                      result['status_code'], task.get('project'), task.get('taskid'),
                      url, error, result['time'])
+        # metrics_logger.info('magneto,module=fetcher,project={} code={},success=0,time={:.2f}'.format(
+        #     task.get('project'), getattr(error, 'code', 599), result['time']))
+
         return result
 
     allowed_options = ['method', 'data', 'connect_timeout', 'timeout', 'cookies', 'use_gzip', 'validate_cert']
@@ -384,8 +392,8 @@ class Fetcher(object):
 
             extract_cookies_to_jar(session, response.request, response.headers)
             if (response.code in (301, 302, 303, 307)
-                    and response.headers.get('Location')
-                    and task_fetch.get('allow_redirects', True)):
+                and response.headers.get('Location')
+                and task_fetch.get('allow_redirects', True)):
                 if max_redirects <= 0:
                     error = tornado.httpclient.HTTPError(
                         599, 'Maximum (%d) redirects followed' % task_fetch.get('max_redirects', 5),
@@ -417,10 +425,14 @@ class Fetcher(object):
                 logger.info("[%d] %s:%s %s %.2fs", response.code,
                             task.get('project'), task.get('taskid'),
                             url, result['time'])
+                # metrics_logger.info('magneto,module=fetcher,project={} code={},success=1,time={:.2f}'.format(
+                #     task.get('project'), response.code, result['time']))
             else:
                 logger.warning("[%d] %s:%s %s %.2fs", response.code,
                                task.get('project'), task.get('taskid'),
                                url, result['time'])
+                # metrics_logger.info('magneto,module=fetcher,project={} code={},success=0,time={:.2f}'.format(
+                #     task.get('project'), response.code, result['time']))
 
             raise gen.Return(result)
 
@@ -700,14 +712,17 @@ class Fetcher(object):
             result = self.sync_fetch(task)
             result = Binary(umsgpack.packb(result))
             return result
+
         application.register_function(sync_fetch, 'fetch')
 
         def dump_counter(_time, _type):
             return self._cnt[_time].to_dict(_type)
+
         application.register_function(dump_counter, 'counter')
 
         def ping():
             return 'pong'
+
         application.register_function(ping, 'ping')
 
         import tornado.wsgi
@@ -732,7 +747,6 @@ class Fetcher(object):
             status_code = (int(status_code) / 100 * 100)
         self._cnt['5m'].event((task.get('project'), status_code), +1)
         self._cnt['1h'].event((task.get('project'), status_code), +1)
-
         if type in ('http', 'phantomjs') and result.get('time'):
             content_len = len(result.get('content', ''))
             self._cnt['5m'].event((task.get('project'), 'speed'),
@@ -741,3 +755,6 @@ class Fetcher(object):
                                   float(content_len) / result.get('time'))
             self._cnt['5m'].event((task.get('project'), 'time'), result.get('time'))
             self._cnt['1h'].event((task.get('project'), 'time'), result.get('time'))
+            success = 1 if 200 <= status_code <= 300 else 0
+            metrics_logger.info('magneto,module=fetcher,project={} code={},success={},time={:.2f}'.format(
+                task.get('project'), status_code, success, result['time']))

@@ -115,7 +115,6 @@ class Fetcher(object):
                 metrics_logger.info('magneto,module=fetcher,project={} code={},success={},time={:.2f}'.format(
                     task.get('project'), result['status_code'], success, result['time']))
             except Exception as e:
-                print(e)
                 logger.exception(e)
 
     def fetch(self, task, callback=None):

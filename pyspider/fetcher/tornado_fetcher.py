@@ -112,7 +112,7 @@ class Fetcher(object):
             try:
                 self.outqueue.put((task, result))
                 success = 1 if 200 <= result['status_code'] < 400 else 0
-                metrics_logger.info('magneto,module=fetcher,project={} code={},success={},time={:.2f}'.format(
+                metrics_logger.info('magneto,module=fetcher,project={},code={},success={} time={:.2f},value=1'.format(
                     task.get('project'), result['status_code'], success, result['time']))
             except Exception as e:
                 logger.exception(e)
@@ -754,6 +754,4 @@ class Fetcher(object):
                                   float(content_len) / result.get('time'))
             self._cnt['5m'].event((task.get('project'), 'time'), result.get('time'))
             self._cnt['1h'].event((task.get('project'), 'time'), result.get('time'))
-            success = 1 if 200 <= status_code <= 300 else 0
-            metrics_logger.info('magneto,module=fetcher,project={} code={},success={},time={:.2f}'.format(
-                task.get('project'), status_code, success, result['time']))
+
